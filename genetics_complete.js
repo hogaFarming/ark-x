@@ -268,22 +268,22 @@ function suggestForPureColor(targetColor, dinos) {
     });
   });
   
-  // 按综合评分排序（而不是仅按平均纯度）
+  // 按综合评分排序
   allPairings.sort((a, b) => b.compositeScore - a.compositeScore);
   
-  // 生成推荐方案（一公对多母）
-  const recommendations = [];
+  // 生成无限制的配对方案 - 使用所有雄性恐龙
+  const allMaleRecommendations = [];
   const usedFemales = new Set();
   
-  males.forEach(male => {
+  // 为每个雄性恐龙分配最佳雌性
+  males.forEach((male, maleIndex) => {
     const malePairings = allPairings.filter(p => p.male.id === male.id);
     const availableFemales = malePairings.filter(p => !usedFemales.has(p.female.id));
     
     if (availableFemales.length > 0) {
-      // 选择最佳的几个雌性配对
+      // 选择所有可用的雌性配对（不限制数量）
       const bestFemales = availableFemales
-        .sort((a, b) => b.compositeScore - a.compositeScore)
-        .slice(0, Math.min(3, availableFemales.length)); // 最多推荐3个雌性
+        .sort((a, b) => b.compositeScore - a.compositeScore);
       
       const recommendation = {
         male: male.getInfo(),
@@ -298,10 +298,11 @@ function suggestForPureColor(targetColor, dinos) {
           perfectRatio: p.perfectRatio,
           compositeScore: p.compositeScore
         })),
-        overallCompositeScore: bestFemales.reduce((sum, p) => sum + p.compositeScore, 0) / bestFemales.length
+        overallCompositeScore: bestFemales.reduce((sum, p) => sum + p.compositeScore, 0) / bestFemales.length,
+        maleIndex: maleIndex + 1
       };
       
-      recommendations.push(recommendation);
+      allMaleRecommendations.push(recommendation);
       
       // 标记已使用的雌性
       bestFemales.forEach(p => usedFemales.add(p.female.id));
@@ -309,17 +310,25 @@ function suggestForPureColor(targetColor, dinos) {
   });
   
   // 按整体综合评分排序
-  recommendations.sort((a, b) => b.overallCompositeScore - a.overallCompositeScore);
+  allMaleRecommendations.sort((a, b) => b.overallCompositeScore - a.overallCompositeScore);
+  
+  // 计算整体方案评分
+  const totalFemales = allMaleRecommendations.reduce((sum, rec) => sum + rec.females.length, 0);
+  const overallScore = allMaleRecommendations.reduce((sum, rec) => sum + rec.overallCompositeScore, 0) / allMaleRecommendations.length;
   
   return {
     targetColor,
     totalPairings: allPairings.length,
-    recommendations,
+    recommendations: allMaleRecommendations,
     summary: {
-      bestCompositeScore: recommendations.length > 0 ? recommendations[0].overallCompositeScore : 0,
+      bestCompositeScore: allMaleRecommendations.length > 0 ? overallScore : 0,
       bestAveragePurity: Math.max(...allPairings.map(p => p.averagePurity)),
       bestMaxPurity: Math.max(...allPairings.map(p => p.maxPurity)),
-      totalRecommendations: recommendations.length
+      totalRecommendations: allMaleRecommendations.length,
+      totalFemalesUsed: totalFemales,
+      totalMalesUsed: allMaleRecommendations.length,
+      totalFemalesAvailable: females.length,
+      totalMalesAvailable: males.length
     }
   };
 }
@@ -433,24 +442,36 @@ function main() {
   console.log(`最佳综合评分: ${(recommendations.summary.bestCompositeScore * 100).toFixed(1)}%`);
   console.log(`最佳平均纯度: ${(recommendations.summary.bestAveragePurity * 100).toFixed(1)}%`);
   console.log(`最佳最大纯度: ${(recommendations.summary.bestMaxPurity * 100).toFixed(1)}%`);
+  console.log(`总雌性数量: ${recommendations.summary.totalFemalesUsed}`);
+  console.log(`总雄性数量: ${recommendations.summary.totalMalesUsed}`);
+  console.log(`可用雌性数量: ${recommendations.summary.totalFemalesAvailable}`);
+  console.log(`可用雄性数量: ${recommendations.summary.totalMalesAvailable}`);
   
   console.log("\n=== 详细推荐方案 ===");
   recommendations.recommendations.forEach((rec, index) => {
-    console.log(`\n推荐方案 ${index + 1}:`);
-    console.log(`  雄性恐龙: ID=${rec.male.id}, 性状=${formatTraits(rec.male.traits)}`);
-    console.log(`  整体综合评分: ${(rec.overallCompositeScore * 100).toFixed(1)}%`);
-    console.log(`  推荐雌性配对:`);
+    console.log(`\n🏆 推荐方案 ${index + 1} (雄性 ${rec.maleIndex}):`);
+    console.log(`   🐲 雄性恐龙: ${rec.male.id} - 性状=${formatTraits(rec.male.traits)}`);
+    console.log(`   📊 整体综合评分: ${(rec.overallCompositeScore * 100).toFixed(1)}%`);
+    console.log(`   👥 推荐雌性配对数量: ${rec.females.length}`);
     
     rec.females.forEach((femaleRec, fIndex) => {
-      console.log(`    雌性 ${fIndex + 1}: ID=${femaleRec.female.id}, 性状=${formatTraits(femaleRec.female.traits)}`);
-      console.log(`      综合评分: ${(femaleRec.compositeScore * 100).toFixed(1)}%`);
-      console.log(`      平均纯度: ${(femaleRec.averagePurity * 100).toFixed(1)}%`);
-      console.log(`      最大纯度: ${(femaleRec.maxPurity * 100).toFixed(1)}%`);
-      console.log(`      高纯度后代: ${femaleRec.highPurityOffspringCount}/8 (${(femaleRec.highPurityRatio * 100).toFixed(1)}%)`);
-      console.log(`      完美后代: ${femaleRec.perfectOffspringCount} (${(femaleRec.perfectRatio * 100).toFixed(1)}%)`);
-      console.log(`      最佳后代: ${formatTraits(femaleRec.bestOffspring)}`);
+      console.log(`\n     雌性 ${fIndex + 1}: ${femaleRec.female.id} - 性状=${formatTraits(femaleRec.female.traits)}`);
+      console.log(`       📈 综合评分: ${(femaleRec.compositeScore * 100).toFixed(1)}%`);
+      console.log(`       📊 平均纯度: ${(femaleRec.averagePurity * 100).toFixed(1)}%`);
+      console.log(`       🎯 最大纯度: ${(femaleRec.maxPurity * 100).toFixed(1)}%`);
+      console.log(`       🌟 高纯度后代: ${femaleRec.highPurityOffspringCount}/8 (${(femaleRec.highPurityRatio * 100).toFixed(1)}%)`);
+      console.log(`       💎 完美后代: ${femaleRec.perfectOffspringCount} (${(femaleRec.perfectRatio * 100).toFixed(1)}%)`);
+      console.log(`       🏅 最佳后代: ${femaleRec.bestOffspring ? formatTraits(femaleRec.bestOffspring) : '无'}`);
     });
   });
+  
+  // 显示整体方案统计
+  console.log(`\n📊 整体方案统计:`);
+  console.log(`• 使用雄性数量: ${recommendations.summary.totalMalesUsed}/${recommendations.summary.totalMalesAvailable}个`);
+  console.log(`• 使用雌性数量: ${recommendations.summary.totalFemalesUsed}/${recommendations.summary.totalFemalesAvailable}个`);
+  console.log(`• 平均每个雄性配对: ${(recommendations.summary.totalFemalesUsed / recommendations.summary.totalMalesUsed).toFixed(1)}个雌性`);
+  console.log(`• 雌性利用率: ${(recommendations.summary.totalFemalesUsed / recommendations.summary.totalFemalesAvailable * 100).toFixed(1)}%`);
+  console.log(`• 雄性利用率: ${(recommendations.summary.totalMalesUsed / recommendations.summary.totalMalesAvailable * 100).toFixed(1)}%`);
 }
 
 // 导出类和函数（如果在Node.js环境中使用）
